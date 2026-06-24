@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MM2H Application Status Checker</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js">
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js">
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js">
+    </script>
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-dark: #4338ca;
+            --primary-light: #eef2ff;
+            --success: #059669;
+            --success-light: #ecfdf5;
+            --danger: #dc2626;
+            --danger-light: #fef2f2;
+            --warning: #d97706;
+            --warning-light: #fffbeb;
+            --info: #2563eb;
+            --info-light: #eff6ff;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-300: #d1d5db;
+            --gray-400: #9ca3af;
+            --gray-500: #6b7280;
+            --gray-600: #4b5563;
+            --gray-700: #374151;
+            --gray-800: #1f2937;
+            --gray-900: #111827;
+            --radius: 12px;
+            --radius-sm: 8px;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+            --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+            --transition: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, #1e1b4b 0%, #312e81 30%, #4c1d95 70%, #5b21b6 100%);
+            background-attachment: fixed;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 20px;
+            color: var(--gray-800);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(ellipse at 20% 50%, rgba(99, 102, 241, 0.15) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 20%, rgba(139, 92, 246, 0.12) 0%, transparent 50%),
+                radial-gradient(ellipse at 60% 80%, rgba(236, 72, 153, 0.08) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+            animation: bgPulse 8s ease-in-out infinite alternate;
+        }
+        @keyframes bgPulse {
+            0% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            background: rgba(255, 255, 255, 0.97);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-radius: 20px;
+            box-shadow: var(--shadow-xl), 0 0 0 1px rgba(255, 255, 255, 0.1);
+            padding: 36px 32px;
+            max-width: 820px;
+            width: 100%;
+            max-height: 95vh;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+        }
+        .container::-webkit-scrollbar { width: 6px; }
+        .container::-webkit-scrollbar-track { background: transparent; border-radius: 3px; }
+        .container::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 3px; }
+        .container::-webkit-scrollbar-thumb:hover { background: var(--gray-400); }
+
+        .header { text-align: center; margin-bottom: 28px; }
+        .logo-badge {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: linear-gradient(135deg, var(--primary) 0%, #7c3aed 100%);
+            color: white; padding: 10px 22px; border-radius: 50px;
+            font-weight: 700; font-size: 15px; letter-spacing: -0.01em;
+            box-shadow: 0 4px 15px rgba(79, 70, 229, 0.35); margin-bottom: 16px;
+        }
+        .header h1 { color: var(--gray-900); font-size: 26px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+        .header .subtitle { color: var(--gray-500); font-size: 14px; margin-top: 4px; }
+
+        /* Live data status banner */
+        .data-status-banner {
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            padding: 8px 16px; border-radius: 50px; font-size: 12px; font-weight: 600;
+            margin-bottom: 20px; transition: all var(--transition);
+        }
+        .data-status-banner.loading { background: #fef3c7; color: #92400e; }
+        .data-status-banner.live    { background: #d1fae5; color: #065f46; }
+        .data-status-banner.cached  { background: #dbeafe; color: #1e40af; }
+        .data-status-banner.error   { background: #fee2e2; color: #991b1b; }
+
+        .tabs { display: flex; gap: 4px; margin-bottom: 28px; background: var(--gray-100); border-radius: 50px; padding: 4px; position: sticky; top: 0; z-index: 10; }
+        .tab {
+            flex: 1; padding: 11px 20px; text-align: center; cursor: pointer; font-weight: 600;
+            font-size: 14px; color: var(--gray-600); transition: all var(--transition); border-radius: 50px;
+            border: none; background: transparent; white-space: nowrap; letter-spacing: -0.01em; user-select: none;
+        }
+        .tab.active { background: white; color: var(--primary); box-shadow: var(--shadow-sm); }
+        .tab:hover:not(.active) { color: var(--gray-800); background: rgba(255,255,255,0.5); }
+
+        .tab-content { display: none; animation: fadeSlideIn 0.3s ease; }
+        .tab-content.active { display: block; }
+        @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+        .card { background: white; border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 24px; margin-bottom: 20px; box-shadow: var(--shadow-sm); transition: box-shadow var(--transition); }
+        .card:hover { box-shadow: var(--shadow-md); }
+        .card-header { font-weight: 700; font-size: 16px; color: var(--gray-900); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; letter-spacing: -0.01em; }
+
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; margin-bottom: 6px; color: var(--gray-700); font-weight: 600; font-size: 13px; letter-spacing: 0.02em; text-transform: uppercase; }
+        .form-group input, .form-group select {
+            width: 100%; padding: 11px 14px; border: 2px solid var(--gray-200); border-radius: var(--radius-sm);
+            font-size: 15px; transition: all var(--transition); background: var(--gray-50); color: var(--gray-900);
+            font-family: inherit; letter-spacing: -0.01em;
+        }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 4px rgba(79,70,229,0.1); background: white; }
+        .form-group input::placeholder { color: var(--gray-400); }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        @media (max-width: 500px) { .form-row { grid-template-columns: 1fr; } }
+
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 11px 20px; border-radius: 50px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all var(--transition); border: none; font-family: inherit; letter-spacing: -0.01em; white-space: nowrap; text-decoration: none; user-select: none; }
+        .btn:active { transform: scale(0.97); }
+        .btn-primary { background: linear-gradient(135deg, var(--primary) 0%, #7c3aed 100%); color: white; box-shadow: 0 2px 8px rgba(79,70,229,0.3); width: 100%; padding: 13px; font-size: 15px; }
+        .btn-primary:hover { box-shadow: 0 4px 16px rgba(79,70,229,0.45); transform: translateY(-1px); }
+        .btn-secondary { background: var(--gray-100); color: var(--gray-700); border: 1px solid var(--gray-200); }
+        .btn-secondary:hover { background: var(--gray-200); }
+        .btn-danger { background: var(--danger); color: white; box-shadow: 0 2px 8px rgba(220,38,38,0.25); }
+        .btn-danger:hover { background: #b91c1c; box-shadow: 0 4px 14px rgba(220,38,38,0.4); }
+        .btn-success { background: var(--success); color: white; box-shadow: 0 2px 8px rgba(5,150,105,0.25); }
+        .btn-success:hover { background: #047857; box-shadow: 0 4px 14px rgba(5,150,105,0.4); }
+        .btn-info { background: var(--info); color: white; }
+        .btn-info:hover { background: #1d4ed8; }
+        .btn-warning { background: var(--warning); color: white; }
+        .btn-warning:hover { background: #b45309; }
+        .btn-sm { padding: 7px 14px; font-size: 12px; border-radius: 30px; }
+        .btn-xs { padding: 4px 10px; font-size: 11px; border-radius: 20px; gap: 3px; }
+        .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+        .btn-group .btn { flex: 1; min-width: 100px; }
+
+        .result-box { margin-top: 20px; padding: 20px 24px; border-radius: var(--radius); display: none; animation: fadeSlideIn 0.35s ease; border: 2px solid transparent; }
+        .result-box.show { display: block; }
+        .result-box.success { background: var(--success-light); border-color: #6ee7b7; }
+        .result-box.error { background: var(--danger-light); border-color: #fca5a5; }
+        .result-box.info { background: var(--info-light); border-color: #93c5fd; }
+        .result-box h3 { margin-bottom: 8px; color: var(--gray-900); font-size: 17px; }
+        .result-box p { margin: 6px 0; color: var(--gray-600); font-size: 14px; }
+
+        .status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 5px 14px; border-radius: 50px; font-weight: 700; font-size: 13px; }
+        .status-approved { background: #d1fae5; color: #065f46; }
+        .status-pending { background: #fef3c7; color: #92400e; }
+        .status-rejected { background: #fee2e2; color: #991b1b; }
+        .status-processing { background: #dbeafe; color: #1e40af; }
+
+        .result-details { margin: 12px 0; }
+        .detail-row { display: flex; padding: 10px 0; border-bottom: 1px solid rgba(0,0,0,0.06); gap: 12px; align-items: center; }
+        .detail-row:last-child { border-bottom: none; }
+        .detail-label { font-weight: 600; min-width: 90px; color: var(--gray-500); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+        .detail-value { flex: 1; color: var(--gray-900); font-weight: 500; }
+
+        .admin-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 16px; }
+        .stat-card { background: var(--gray-50); border-radius: var(--radius-sm); padding: 14px; text-align: center; border: 1px solid var(--gray-200); }
+        .stat-card .stat-value { font-size: 28px; font-weight: 800; color: var(--primary); }
+        .stat-card .stat-label { font-size: 11px; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
+
+        .records-table-wrap { overflow-x: auto; max-height: 400px; overflow-y: auto; border-radius: var(--radius-sm); border: 1px solid var(--gray-200); }
+        .records-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 600px; }
+        .records-table th { background: var(--gray-50); padding: 10px 12px; text-align: left; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--gray-500); border-bottom: 2px solid var(--gray-200); position: sticky; top: 0; z-index: 1; }
+        .records-table td { padding: 10px 12px; border-bottom: 1px solid var(--gray-100); color: var(--gray-700); }
+        .records-table tbody tr:hover { background: var(--gray-50); }
+        .records-table .actions { display: flex; gap: 4px; }
+
+        .toast-container { position: fixed; top: 20px; right: 20px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; }
+        .toast { padding: 12px 20px; border-radius: 50px; color: white; font-weight: 600; font-size: 13px; box-shadow: var(--shadow-lg); animation: slideInRight 0.3s ease, fadeOutRight 0.3s ease 2.7s forwards; max-width: 380px; }
+        .toast.success { background: var(--success); }
+        .toast.error { background: var(--danger); }
+        .toast.info { background: var(--info); }
+        @keyframes slideInRight { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes fadeOutRight { from { transform: translateX(0); opacity: 1; } to { transform: translateX(120%); opacity: 0; } }
+
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; display: flex; align-items: center; justify-content: center; animation: fadeIn 0.2s ease; }
+        .modal { background: white; border-radius: var(--radius); padding: 28px; max-width: 500px; width: 90%; box-shadow: var(--shadow-xl); animation: scaleIn 0.25s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+        .search-box { position: relative; margin-bottom: 12px; }
+        .search-box input { width: 100%; padding: 10px 14px 10px 38px; border: 2px solid var(--gray-200); border-radius: 50px; font-size: 14px; background: var(--gray-50); }
+        .search-box input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 4px rgba(79,70,229,0.08); background: white; }
+        .search-box .search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--gray-400); pointer-events: none; }
+
+        .storage-indicator { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 50px; font-size: 11px; font-weight: 700; }
+        .storage-local { background: #dbeafe; color: #1e40af; }
+        .storage-persistent { background: #d1fae5; color: #065f46; }
+
+        .file-drop-zone { border: 2px dashed var(--gray-300); border-radius: var(--radius); padding: 28px; text-align: center; cursor: pointer; transition: all var(--transition); background: var(--gray-50); }
+        .file-drop-zone:hover, .file-drop-zone.dragover { border-color: var(--primary); background: var(--primary-light); }
+        .file-drop-zone .drop-icon { font-size: 36px; margin-bottom: 8px; }
+        .file-drop-zone p { color: var(--gray-500); font-size: 13px; }
+
+        .empty-state { text-align: center; padding: 40px 20px; color: var(--gray-400); }
+        .empty-state .empty-icon { font-size: 48px; margin-bottom: 12px; }
+        hr { border: none; border-top: 1px solid var(--gray-200); margin: 16px 0; }
+        code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+
+        .sheet-url-display { font-size: 11px; color: var(--gray-400); margin-top: 6px; word-break: break-all; }
+    </style>
+</head>
+<body>
+    <div class="toast-container" id="toastContainer"></div>
+
+    <div class="container" id="app">
+        <div class="header">
+            <div class="logo-badge">🏠 MM2H Checker</div>
+            <h1>Application Status Checker</h1>
+            <p class="subtitle">Malaysia My Second Home — Track your application</p>
+        </div>
+
+        <!-- Live data status banner -->
+        <div class="data-status-banner loading" id="dataStatusBanner">
+            ⏳ Loading application data…
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" data-tab="check" onclick="switchTab('check')">🔍 Check Status</button>
+            <button class="tab" data-tab="admin" onclick="switchTab('admin')">⚙️ Admin Panel</button>
+        </div>
+
+        <!-- Check Tab -->
+        <div class="tab-content active" id="tab-check">
+            <div class="card">
+                <div class="card-header">🔍 Look Up Your Application</div>
+                <form id="checkForm" onsubmit="checkStatus(event)">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Full Name</label>
+                            <input type="text" id="name" placeholder="e.g. Ahmad Bin Abdullah" required autocomplete="name">
+                        </div>
+                        <div class="form-group">
+                            <label>Passport Number</label>
+                            <input type="text" id="passport" placeholder="e.g. A12345678" required autocomplete="off">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">🔎 Check Application Status</button>
+                </form>
+                <div id="result" class="result-box"></div>
+            </div>
+            <div class="card" style="background:var(--gray-50);border:1px solid var(--gray-200);">
+                <p style="font-size:13px;color:var(--gray-500);text-align:center;margin:0;">
+                    💡 <strong>Tip:</strong> Name matching is <em>case‑insensitive</em> and handles partial matches. Passport numbers must match exactly.
+                </p>
+            </div>
+        </div>
+
+        <!-- Admin Tab -->
+        <div class="tab-content" id="tab-admin">
+            <div class="card" id="adminLoginCard">
+                <div class="card-header">🔐 Administrator Login</div>
+                <form id="adminLoginForm" onsubmit="adminLogin(event)">
+                    <div class="form-group"><label>Username</label><input type="text" id="adminUser" placeholder="Enter username" required autocomplete="username"></div>
+                    <div class="form-group"><label>Password</label><input type="password" id="adminPass" placeholder="Enter password" required autocomplete="current-password"></div>
+                    <button type="submit" class="btn btn-primary">🔓 Sign In</button>
+                </form>
+                <div id="adminMessage" style="margin-top:12px;font-size:13px;"></div>
+            </div>
+
+            <div id="adminControls" style="display:none;">
+                <div class="card">
+                    <div class="card-header">📊 Dashboard <span class="storage-indicator storage-persistent">🌐 Live Google Sheets</span></div>
+                    <div class="admin-stats" id="adminStats">
+                        <div class="stat-card"><div class="stat-value" id="statTotal">0</div><div class="stat-label">Total</div></div>
+                        <div class="stat-card"><div class="stat-value" id="statApproved">0</div><div class="stat-label">✅ Approved</div></div>
+                        <div class="stat-card"><div class="stat-value" id="statPending">0</div><div class="stat-label">⏳ Pending</div></div>
+                        <div class="stat-card"><div class="stat-value" id="statProcessing">0</div><div class="stat-label">🔄 Processing</div></div>
+                        <div class="stat-card"><div class="stat-value" id="statRejected">0</div><div class="stat-label">❌ Rejected</div></div>
+                    </div>
+                    <div class="btn-group" style="margin-bottom:12px;">
+                        <button class="btn btn-success btn-sm" onclick="exportDatabase('json')">💾 Export JSON</button>
+                        <button class="btn btn-info btn-sm" onclick="exportDatabase('csv')">📄 Export CSV</button>
+                        <button class="btn btn-info btn-sm" onclick="exportDatabase('xlsx')">📊 Export Excel</button>
+                        <button class="btn btn-warning btn-sm" onclick="importFromHardDrive()">📂 Import File</button>
+                    </div>
+                    <button class="btn btn-secondary btn-sm" onclick="loadLiveData(true)" style="width:auto;">🔄 Refresh Live Data</button>
+                </div>
+
+                <!-- Google Sheets Live Config -->
+                <div class="card" style="border: 2px solid #6ee7b7; background: #f0fdf4;">
+                    <div class="card-header">🌐 Live Data Source — Google Sheets</div>
+                    <p style="font-size:13px;color:var(--gray-600);margin-bottom:12px;">
+                        This is where clients worldwide get their data. Publish your Google Sheet as CSV
+                        (<code>File → Share → Publish to web → CSV</code>) and paste the URL here.
+                        The app will fetch it live on every page load.
+                    </p>
+                    <div class="form-group">
+                        <label>Published CSV URL</label>
+                        <input type="url" id="liveSheetUrl" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv">
+                        <div class="sheet-url-display" id="currentSheetUrlDisplay"></div>
+                    </div>
+                    <div style="margin-bottom:12px;">
+                        <label style="font-size:12px;color:var(--gray-500);">
+                            <input type="checkbox" id="mergeGoogleSheet" checked> Merge with existing records
+                        </label>
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn btn-success btn-sm" onclick="saveLiveSheetUrl()">💾 Save & Activate</button>
+                        <button class="btn btn-info btn-sm" onclick="testAndImportSheet()">📥 Test & Import Now</button>
+                    </div>
+                    <div id="googleSheetFeedback" style="margin-top:10px;font-size:13px;"></div>
+                </div>
+
+                <!-- File Upload Card -->
+                <div class="card">
+                    <div class="card-header">📤 Bulk Upload Records (File)</div>
+                    <div class="file-drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                        <div class="drop-icon">📁</div>
+                        <p><strong>Click to browse</strong> or drag & drop a file here</p>
+                        <p style="font-size:11px;color:var(--gray-400);">Excel (.xlsx, .xls), CSV, PDF, or JSON</p>
+                        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.pdf,.json" style="display:none;" onchange="handleFileUpload(this.files)">
+                    </div>
+                    <div style="margin-top:8px;">
+                        <label style="font-size:12px;color:var(--gray-500);">
+                            <input type="checkbox" id="mergeUpload" checked> Merge with existing (uncheck to replace all)
+                        </label>
+                    </div>
+                    <div id="uploadFeedback" style="margin-top:8px;font-size:13px;"></div>
+                </div>
+
+                <!-- Records Table -->
+                <div class="card">
+                    <div class="card-header" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                        <span>📋 All Records</span>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                            <button class="btn btn-secondary btn-xs" onclick="addRecordModal()">➕ Add Record</button>
+                            <button class="btn btn-success btn-xs" onclick="addSampleData()">📝 Load Samples</button>
+                            <button class="btn btn-danger btn-xs" onclick="clearAllData()">🗑️ Clear All</button>
+                        </div>
+                    </div>
+                    <div class="search-box">
+                        <span class="search-icon">🔍</span>
+                        <input type="text" id="recordSearch" placeholder="Search by name or passport..." oninput="renderRecordsTable()">
+                    </div>
+                    <div class="records-table-wrap" id="recordsTableWrap">
+                        <div class="empty-state" id="emptyState"><div class="empty-icon">📭</div><p>No records yet.</p></div>
+                        <table class="records-table" id="recordsTable" style="display:none;">
+                            <thead><tr><th>#</th><th>Name</th><th>Passport</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
+                            <tbody id="recordsTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Credentials Reset -->
+                <div class="card">
+                    <div class="card-header">🔐 Reset Admin Credentials</div>
+                    <div class="form-row">
+                        <div class="form-group"><label>New Username</label><input type="text" id="newUsername" placeholder="New username"></div>
+                        <div class="form-group"><label>New Password</label><input type="password" id="newPassword" placeholder="New password"></div>
+                    </div>
+                    <button class="btn btn-warning" onclick="resetCredentials()" style="width:auto;">🔄 Update Credentials</button>
+                    <div id="resetMessage" style="margin-top:8px;font-size:13px;"></div>
+                </div>
+                <button class="btn btn-secondary btn-sm" onclick="adminLogout()" style="margin-top:8px;">🚪 Logout</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div class="modal-overlay" id="editModal" style="display:none;" onclick="closeModalOutside(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <h3 style="margin-bottom:16px;">✏️ Edit Record</h3>
+            <input type="hidden" id="editIndex">
+            <div class="form-group"><label>Name</label><input type="text" id="editName"></div>
+            <div class="form-group"><label>Passport</label><input type="text" id="editPassport"></div>
+            <div class="form-group"><label>Status</label><select id="editStatus"><option value="Approved">Approved</option><option value="Pending">Pending</option><option value="Processing">Processing</option><option value="Rejected">Rejected</option></select></div>
+            <div class="form-group"><label>Date</label><input type="date" id="editDate"></div>
+            <div class="btn-group" style="margin-top:16px;">
+                <button class="btn btn-primary btn-sm" onclick="saveRecordEdit()">💾 Save</button>
+                <button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== GLOBAL STATE ====================
+        let database = [];
+        let adminCredentials = { username: 'AHS', password: '123' };
+        let isAdminLoggedIn = false;
+        let liveSheetUrl = '';
+
+        // ==================== STORAGE ====================
+        function loadFromStorage() {
+            const saved = localStorage.getItem('mm2h_database_v2');
+            if (saved) { try { database = JSON.parse(saved); if (!Array.isArray(database)) database = []; } catch (e) { database = []; } }
+            const savedCreds = localStorage.getItem('mm2h_admin_creds_v2');
+            if (savedCreds) { try { const creds = JSON.parse(savedCreds); if (creds.username && creds.password) adminCredentials = creds; } catch (e) {} }
+            const savedUrl = localStorage.getItem('mm2h_live_sheet_url');
+            if (savedUrl) liveSheetUrl = savedUrl;
+        }
+        function saveToStorage() {
+            localStorage.setItem('mm2h_database_v2', JSON.stringify(database));
+            localStorage.setItem('mm2h_admin_creds_v2', JSON.stringify(adminCredentials));
+            if (liveSheetUrl) localStorage.setItem('mm2h_live_sheet_url', liveSheetUrl);
+        }
+
+        // ==================== LIVE DATA (Google Sheets) ====================
+        function setDataBanner(state, message) {
+            const banner = document.getElementById('dataStatusBanner');
+            banner.className = `data-status-banner ${state}`;
+            banner.textContent = message;
+        }
+
+        // Fetches a Google Sheets CSV URL through CORS proxies (tries each in order)
+        async function fetchSheetCsv(url) {
+            const proxies = [
+                u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+                u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+                u => `https://thingproxy.freeboard.io/fetch/${u}`,
+            ];
+            let lastError = '';
+            for (const makeUrl of proxies) {
+                try {
+                    const res = await fetch(makeUrl(url));
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    const text = await res.text();
+                    if (text && text.trim().length > 0) return text;
+                    throw new Error('Empty response');
+                } catch (e) { lastError = e.message; }
+            }
+            throw new Error('Could not load sheet data. Make sure your sheet is published as CSV and is publicly accessible. (Details: ' + lastError + ')');
+        }
+
+        async function loadLiveData(manual = false) {
+            // Load credentials and saved URL from storage first
+            loadFromStorage();
+
+            if (!liveSheetUrl) {
+                // No live URL configured — use localStorage data
+                setDataBanner('cached', '💾 Showing locally cached data — no live sheet configured yet');
+                updateAdminStats();
+                renderRecordsTable();
+                return;
+            }
+
+            setDataBanner('loading', '⏳ Fetching live data from Google Sheets…');
+            try {
+                const csvText = await fetchSheetCsv(liveSheetUrl);
+                const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+
+                if (parsed.data.length === 0) throw new Error('Sheet returned no data');
+
+                const headers = parsed.meta.fields;
+                const nameKey = findColumnKey(headers, 'name', 'full name', 'applicant');
+                const passportKey = findColumnKey(headers, 'passport', 'passport no', 'passport number');
+                const statusKey = findColumnKey(headers, 'status');
+                const dateKey = findColumnKey(headers, 'date', 'updated', 'last');
+
+                if (!nameKey || !passportKey) throw new Error('Could not find Name/Passport columns. Headers: ' + headers.join(', '));
+
+                const records = parsed.data.map(row => ({
+                    name: (row[nameKey] || '').trim(),
+                    passport: (row[passportKey] || '').toString().toUpperCase().trim(),
+                    status: statusKey ? (row[statusKey] || 'Pending').trim() : 'Pending',
+                    date: dateKey ? (row[dateKey] || '').trim() : ''
+                })).filter(r => r.name && r.passport);
+
+                database = records;
+                saveToStorage();
+                setDataBanner('live', `🌐 Live data loaded — ${records.length} records from Google Sheets`);
+                if (manual) showToast(`Refreshed: ${records.length} records loaded`, 'success');
+            } catch (err) {
+                // Fall back gracefully to cached data
+                setDataBanner('error', `⚠️ Could not reach Google Sheets — showing cached data (${database.length} records)`);
+                if (manual) showToast('Error: ' + err.message, 'error');
+                console.warn('Live sheet error:', err.message);
+            }
+            updateAdminStats();
+            renderRecordsTable();
+        }
+
+        // ==================== SHEET URL MANAGEMENT ====================
+        function saveLiveSheetUrl() {
+            const url = document.getElementById('liveSheetUrl').value.trim();
+            const feedback = document.getElementById('googleSheetFeedback');
+            if (!url) { feedback.textContent = '❌ Please enter a URL.'; feedback.style.color = '#dc2626'; return; }
+            if (!url.includes('docs.google.com') && !url.startsWith('http')) {
+                feedback.textContent = '❌ Please enter a valid Google Sheets published CSV URL.'; feedback.style.color = '#dc2626'; return;
+            }
+            liveSheetUrl = url;
+            localStorage.setItem('mm2h_live_sheet_url', url);
+            updateSheetUrlDisplay();
+            feedback.textContent = '✅ Live sheet URL saved! Data will load from this sheet on every page visit.';
+            feedback.style.color = '#059669';
+            showToast('Live sheet URL saved', 'success');
+        }
+
+        async function testAndImportSheet() {
+            const url = document.getElementById('liveSheetUrl').value.trim();
+            const feedback = document.getElementById('googleSheetFeedback');
+            if (!url) { feedback.textContent = '❌ Please enter a URL first.'; feedback.style.color = '#dc2626'; return; }
+            feedback.textContent = '⏳ Testing connection…'; feedback.style.color = '#6b7280';
+            try {
+                const csvText = await fetchSheetCsv(url);
+                const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+                const headers = parsed.meta.fields;
+                const nameKey = findColumnKey(headers, 'name', 'full name', 'applicant');
+                const passportKey = findColumnKey(headers, 'passport', 'passport no', 'passport number');
+                const statusKey = findColumnKey(headers, 'status');
+                const dateKey = findColumnKey(headers, 'date', 'updated', 'last');
+                if (!nameKey || !passportKey) {
+                    feedback.textContent = '❌ Could not find Name and Passport columns. Headers found: ' + headers.join(', ');
+                    feedback.style.color = '#dc2626'; return;
+                }
+                const records = parsed.data.map(row => ({
+                    name: (row[nameKey] || '').trim(),
+                    passport: (row[passportKey] || '').toString().toUpperCase().trim(),
+                    status: statusKey ? (row[statusKey] || 'Pending').trim() : 'Pending',
+                    date: dateKey ? (row[dateKey] || '').trim() : ''
+                })).filter(r => r.name && r.passport);
+                const merge = document.getElementById('mergeGoogleSheet').checked;
+                processUploadedRecords(records, merge, feedback, 'Google Sheet');
+                setDataBanner('live', `🌐 Live data loaded — ${database.length} records from Google Sheets`);
+            } catch (err) {
+                feedback.textContent = '❌ Error: ' + err.message;
+                feedback.style.color = '#dc2626';
+            }
+        }
+
+        function updateSheetUrlDisplay() {
+            const el = document.getElementById('currentSheetUrlDisplay');
+            if (el && liveSheetUrl) {
+                el.textContent = '✅ Active: ' + liveSheetUrl.substring(0, 60) + (liveSheetUrl.length > 60 ? '…' : '');
+            }
+        }
+
+        // ==================== TOAST ====================
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => { if (toast.parentNode) toast.remove(); }, 3200);
+        }
+
+        // ==================== TABS ====================
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            const tabBtn = document.querySelector(`[data-tab="${tabName}"]`);
+            if (tabBtn) tabBtn.classList.add('active');
+            const tabContent = document.getElementById(`tab-${tabName}`);
+            if (tabContent) tabContent.classList.add('active');
+            if (tabName === 'admin') {
+                updateAdminStats();
+                // Pre-fill the sheet URL field if saved
+                if (liveSheetUrl) {
+                    const urlField = document.getElementById('liveSheetUrl');
+                    if (urlField && !urlField.value) urlField.value = liveSheetUrl;
+                    updateSheetUrlDisplay();
+                }
+            }
+        }
+
+        // ==================== NAME MATCHING ====================
+        function normalizeText(text) {
+            return text.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+        }
+        function matchNameCaseInsensitive(inputName, dbName) {
+            const ni = normalizeText(inputName), nd = normalizeText(dbName);
+            if (!ni || !nd) return false;
+            if (ni === nd) return true;
+            if (nd.includes(ni) || ni.includes(nd)) return true;
+            const inputWords = ni.split(' ').filter(w => w.length > 1);
+            const dbWords = nd.split(' ').filter(w => w.length > 1);
+            if (inputWords.length === 0) return false;
+            return inputWords.every(iw => dbWords.some(dw => dw.includes(iw) || iw.includes(dw)));
+        }
+
+        // ==================== CHECK STATUS ====================
+        function checkStatus(event) {
+            event.preventDefault();
+            const inputName = document.getElementById('name').value.trim();
+            const inputPassport = document.getElementById('passport').value.trim();
+            const resultDiv = document.getElementById('result');
+            if (!inputName || !inputPassport) { showResult('⚠️ Please fill in both fields.', 'error'); return; }
+            if (database.length === 0) { showResult('<h3>📭 Database is Empty</h3><p>No records yet. Please try again shortly.</p>', 'info'); return; }
+            const record = database.find(r => matchNameCaseInsensitive(inputName, r.name) && r.passport.toUpperCase().trim() === inputPassport.toUpperCase().trim());
+            if (record) {
+                const statusMap = { 'Approved': 'status-approved', 'Pending': 'status-pending', 'Rejected': 'status-rejected', 'Processing': 'status-processing' };
+                showResult(`
+                    <h3>✅ Application Found</h3>
+                    <div class="result-details">
+                        <div class="detail-row"><span class="detail-label">Name</span><span class="detail-value">${escapeHtml(record.name)}</span></div>
+                        <div class="detail-row"><span class="detail-label">Passport</span><span class="detail-value">${escapeHtml(record.passport)}</span></div>
+                        <div class="detail-row"><span class="detail-label">Status</span><span class="detail-value"><span class="status-badge ${statusMap[record.status]||''}">${escapeHtml(record.status)}</span></span></div>
+                        ${record.date ? `<div class="detail-row"><span class="detail-label">Date</span><span class="detail-value">${escapeHtml(record.date)}</span></div>` : ''}
+                    </div>`, 'success');
+            } else {
+                showResult(`<h3>❌ No Record Found</h3><p>No match for <strong>${escapeHtml(inputName)}</strong> / <strong>${escapeHtml(inputPassport)}</strong>.</p>`, 'error');
+            }
+        }
+        function showResult(message, type) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.className = `result-box show ${type}`;
+            resultDiv.innerHTML = message;
+            resultDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+        function escapeHtml(str) { const div = document.createElement('div'); div.textContent = str; return div.innerHTML; }
+
+        // ==================== ADMIN LOGIN ====================
+        function adminLogin(event) {
+            event.preventDefault();
+            const username = document.getElementById('adminUser').value.trim();
+            const password = document.getElementById('adminPass').value;
+            const msgDiv = document.getElementById('adminMessage');
+            if (username === adminCredentials.username && password === adminCredentials.password) {
+                isAdminLoggedIn = true;
+                msgDiv.style.color = '#059669'; msgDiv.textContent = '✅ Login successful!';
+                document.getElementById('adminControls').style.display = 'block';
+                document.getElementById('adminLoginCard').style.display = 'none';
+                updateAdminStats(); renderRecordsTable();
+                if (liveSheetUrl) {
+                    const urlField = document.getElementById('liveSheetUrl');
+                    if (urlField) urlField.value = liveSheetUrl;
+                    updateSheetUrlDisplay();
+                }
+                showToast('Welcome back!', 'success');
+            } else {
+                msgDiv.style.color = '#dc2626'; msgDiv.textContent = '❌ Invalid credentials.';
+                showToast('Invalid credentials', 'error');
+            }
+        }
+        function adminLogout() {
+            isAdminLoggedIn = false;
+            document.getElementById('adminControls').style.display = 'none';
+            document.getElementById('adminLoginCard').style.display = 'block';
+            document.getElementById('adminUser').value = ''; document.getElementById('adminPass').value = '';
+            document.getElementById('adminMessage').textContent = '';
+            showToast('Logged out', 'info');
+        }
+        function resetCredentials() {
+            const newUser = document.getElementById('newUsername').value.trim();
+            const newPass = document.getElementById('newPassword').value;
+            const msgDiv = document.getElementById('resetMessage');
+            if (!newUser || !newPass) { msgDiv.style.color = '#dc2626'; msgDiv.textContent = 'Please fill both fields.'; return; }
+            adminCredentials = { username: newUser, password: newPass };
+            saveToStorage();
+            msgDiv.style.color = '#059669'; msgDiv.textContent = `✅ Updated. Username: ${newUser}`;
+            document.getElementById('newUsername').value = ''; document.getElementById('newPassword').value = '';
+            showToast('Credentials updated', 'success');
+        }
+
+        // ==================== STATS & TABLE ====================
+        function updateAdminStats() {
+            document.getElementById('statTotal').textContent = database.length;
+            document.getElementById('statApproved').textContent = database.filter(r=>r.status==='Approved').length;
+            document.getElementById('statPending').textContent = database.filter(r=>r.status==='Pending').length;
+            document.getElementById('statProcessing').textContent = database.filter(r=>r.status==='Processing').length;
+            document.getElementById('statRejected').textContent = database.filter(r=>r.status==='Rejected').length;
+        }
+        function renderRecordsTable() {
+            const searchTerm = document.getElementById('recordSearch')?.value || '';
+            const tbody = document.getElementById('recordsTableBody');
+            const table = document.getElementById('recordsTable');
+            const emptyState = document.getElementById('emptyState');
+            let filtered = database;
+            if (searchTerm.trim()) {
+                const term = searchTerm.toLowerCase().trim();
+                filtered = database.filter(r => r.name.toLowerCase().includes(term) || r.passport.toLowerCase().includes(term) || r.status.toLowerCase().includes(term));
+            }
+            if (filtered.length === 0) {
+                table.style.display = 'none'; emptyState.style.display = 'block';
+                emptyState.innerHTML = database.length === 0 ? '<div class="empty-icon">📭</div><p>No records yet.</p>' : '<div class="empty-icon">🔍</div><p>No matches.</p>';
+            } else {
+                table.style.display = 'table'; emptyState.style.display = 'none';
+                const statusMap = { 'Approved':'status-approved','Pending':'status-pending','Rejected':'status-rejected','Processing':'status-processing' };
+                tbody.innerHTML = filtered.map(r => {
+                    const idx = database.indexOf(r);
+                    return `<tr>
+                        <td>${idx+1}</td>
+                        <td>${escapeHtml(r.name)}</td>
+                        <td><code>${escapeHtml(r.passport)}</code></td>
+                        <td><span class="status-badge ${statusMap[r.status]||''}">${escapeHtml(r.status)}</span></td>
+                        <td>${escapeHtml(r.date||'—')}</td>
+                        <td class="actions">
+                            <button class="btn btn-info btn-xs" onclick="editRecord(${idx})">✏️</button>
+                            <button class="btn btn-danger btn-xs" onclick="deleteRecord(${idx})">🗑️</button>
+                        </td>
+                    </tr>`;
+                }).join('');
+            }
+            updateAdminStats();
+        }
+
+        function editRecord(index) {
+            const r = database[index]; if (!r) return;
+            document.getElementById('editIndex').value = index;
+            document.getElementById('editName').value = r.name;
+            document.getElementById('editPassport').value = r.passport;
+            document.getElementById('editStatus').value = r.status;
+            document.getElementById('editDate').value = r.date || new Date().toISOString().split('T')[0];
+            document.getElementById('editModal').style.display = 'flex';
+        }
+        function saveRecordEdit() {
+            const index = parseInt(document.getElementById('editIndex').value);
+            if (isNaN(index) || index < 0 || index >= database.length) return;
+            database[index].name = document.getElementById('editName').value.trim();
+            database[index].passport = document.getElementById('editPassport').value.trim().toUpperCase();
+            database[index].status = document.getElementById('editStatus').value;
+            database[index].date = document.getElementById('editDate').value;
+            saveToStorage(); renderRecordsTable(); closeModal();
+            showToast('Record updated', 'success');
+        }
+        function deleteRecord(index) {
+            if (!confirm('Delete this record?')) return;
+            database.splice(index,1); saveToStorage(); renderRecordsTable();
+            showToast('Record deleted', 'error');
+        }
+        function addRecordModal() {
+            const name = prompt('Full name:'); if (!name?.trim()) return;
+            const passport = prompt('Passport number:'); if (!passport?.trim()) return;
+            const status = prompt('Status (Approved/Pending/Processing/Rejected):','Pending');
+            const valid = ['Approved','Pending','Processing','Rejected'];
+            database.push({ name: name.trim(), passport: passport.trim().toUpperCase(), status: valid.includes(status)?status:'Pending', date: new Date().toISOString().split('T')[0] });
+            saveToStorage(); renderRecordsTable();
+            showToast('Record added', 'success');
+        }
+        function closeModal() { document.getElementById('editModal').style.display = 'none'; }
+        function closeModalOutside(e) { if (e.target === document.getElementById('editModal')) closeModal(); }
+
+        // ==================== FILE UPLOAD ====================
+        function handleFileUpload(files) {
+            if (!files || files.length===0) return;
+            const file = files[0];
+            const ext = '.'+file.name.split('.').pop().toLowerCase();
+            const feedback = document.getElementById('uploadFeedback');
+            feedback.textContent = '⏳ Processing...'; feedback.style.color = '#6b7280';
+            const reader = new FileReader();
+            const merge = document.getElementById('mergeUpload').checked;
+            if (ext === '.json') {
+                reader.onload = e => {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        const records = Array.isArray(data.database) ? data.database : (Array.isArray(data) ? data : []);
+                        processUploadedRecords(records, merge, feedback, file.name);
+                    } catch(err) { feedback.textContent = '❌ '+err.message; feedback.style.color = '#dc2626'; }
+                };
+                reader.readAsText(file);
+            } else if (ext === '.csv') {
+                reader.onload = e => {
+                    const parsed = Papa.parse(e.target.result, { header:true, skipEmptyLines:true });
+                    const records = parsed.data.map(r => ({
+                        name: r.Name||r.name||r['Full Name']||'',
+                        passport: (r.Passport||r.passport||r['Passport Number']||'').toString().toUpperCase(),
+                        status: r.Status||r.status||'Pending',
+                        date: r.Date||r.date||new Date().toISOString().split('T')[0]
+                    })).filter(r => r.name && r.passport);
+                    processUploadedRecords(records, merge, feedback, file.name);
+                };
+                reader.readAsText(file);
+            } else if (ext === '.pdf') {
+                reader.onload = async e => {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        const pdf = await pdfjsLib.getDocument({ data }).promise;
+                        let text = '';
+                        for (let i=1; i<=pdf.numPages; i++) { const page = await pdf.getPage(i); const content = await page.getTextContent(); text += content.items.map(it=>it.str).join(' ')+'\n'; }
+                        const records = parseTextToRecords(text);
+                        processUploadedRecords(records, merge, feedback, file.name);
+                    } catch(err) { feedback.textContent = '❌ '+err.message; feedback.style.color = '#dc2626'; }
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                reader.onload = e => {
+                    try {
+                        const wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' });
+                        const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+                        const records = json.map(r => ({
+                            name: r.Name||r.name||'',
+                            passport: (r.Passport||r.passport||'').toString().toUpperCase(),
+                            status: r.Status||r.status||'Pending',
+                            date: r.Date||r.date||new Date().toISOString().split('T')[0]
+                        })).filter(r => r.name && r.passport);
+                        processUploadedRecords(records, merge, feedback, file.name);
+                    } catch(err) { feedback.textContent = '❌ '+err.message; feedback.style.color = '#dc2626'; }
+                };
+                reader.readAsArrayBuffer(file);
+            }
+        }
+
+        function parseTextToRecords(text) {
+            const lines = text.split('\n').filter(l=>l.trim());
+            const records = [];
+            for (let line of lines) {
+                const parts = line.split(/[\t,;|]\s*/);
+                if (parts.length>=3) {
+                    const name = parts[0]?.trim(), passport = parts[1]?.trim()?.toUpperCase(), status = parts[2]?.trim();
+                    if (name && passport && /^[A-Z0-9]+$/.test(passport)) {
+                        const valid = ['Approved','Pending','Processing','Rejected'];
+                        records.push({ name, passport, status: valid.find(s=>s.toLowerCase()===status?.toLowerCase())||'Pending', date: parts[3]?.trim()||new Date().toISOString().split('T')[0] });
+                    }
+                }
+            }
+            return records;
+        }
+
+        function processUploadedRecords(records, merge, feedbackEl, sourceName) {
+            if (!merge) database = [];
+            let added=0, updated=0;
+            records.forEach(rec => {
+                const idx = database.findIndex(r => r.passport.toUpperCase() === rec.passport.toUpperCase());
+                if (idx>=0) { database[idx] = {...database[idx], ...rec}; updated++; }
+                else { database.push(rec); added++; }
+            });
+            saveToStorage(); renderRecordsTable();
+            feedbackEl.innerHTML = `✅ Processed <strong>${escapeHtml(sourceName)}</strong>: ${added} added, ${updated} updated. Total: ${database.length}.`;
+            feedbackEl.style.color = '#059669';
+            showToast(`${added} added, ${updated} updated`, 'success');
+        }
+
+        function importFromHardDrive() {
+            const input = document.createElement('input');
+            input.type='file'; input.accept='.json,.csv,.xlsx,.xls,.pdf';
+            input.onchange = () => handleFileUpload(input.files);
+            input.click();
+        }
+
+        // ==================== COLUMN KEY HELPER ====================
+        function findColumnKey(keys, ...aliases) {
+            return keys.find(k => aliases.some(a => k.toLowerCase().includes(a))) || null;
+        }
+
+        // ==================== EXPORT ====================
+        function exportDatabase(format) {
+            if (database.length===0) { showToast('Nothing to export.','error'); return; }
+            const ts = new Date().toISOString().split('T')[0];
+            let blob, filename;
+            if (format==='json') {
+                blob = new Blob([JSON.stringify({database, exportDate:new Date().toISOString(), recordCount:database.length}, null, 2)], {type:'application/json'});
+                filename = `MM2H_${ts}.json`;
+            } else if (format==='csv') {
+                const csv = Papa.unparse(database.map(r=>({Name:r.name, Passport:r.passport, Status:r.status, Date:r.date||''})));
+                blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+                filename = `MM2H_${ts}.csv`;
+            } else if (format==='xlsx') {
+                const ws = XLSX.utils.json_to_sheet(database.map(r=>({Name:r.name, Passport:r.passport, Status:r.status, Date:r.date||''})));
+                const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Records');
+                blob = new Blob([XLSX.write(wb, {bookType:'xlsx', type:'array'})], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+                filename = `MM2H_${ts}.xlsx`;
+            }
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+            showToast(`Exported ${database.length} records`, 'success');
+        }
+
+        function addSampleData() {
+            const samples = [
+                {name:'Ching Chien',passport:'F12345678',status:'Approved',date:'2024-06-15'},
+                {name:'Ahmad Bin Abdullah',passport:'A12345678',status:'Approved',date:'2024-01-15'},
+                {name:'Tan Mei Ling',passport:'B98765432',status:'Pending',date:'2024-02-20'},
+                {name:'Raj Kumar A/L Muthu',passport:'C45678901',status:'Processing',date:'2024-03-10'},
+                {name:'Wong Siew Fong',passport:'D23456789',status:'Rejected',date:'2024-01-05'},
+                {name:'John Doe',passport:'E34567890',status:'Approved',date:'2024-02-28'},
+                {name:'MOHAMED ALI',passport:'G98765432',status:'Processing',date:'2024-06-10'},
+                {name:'sarah tan',passport:'H45678901',status:'Pending',date:'2024-06-05'},
+                {name:'david chen',passport:'I23456789',status:'Approved',date:'2024-05-28'},
+            ];
+            let added=0;
+            samples.forEach(r=>{ if(!database.some(x=>x.passport===r.passport)){ database.push(r); added++; } });
+            saveToStorage(); renderRecordsTable();
+            showToast(`Added ${added} samples`,'success');
+        }
+        function clearAllData() {
+            if (!confirm('Delete ALL records? Type DELETE to confirm.')) return;
+            if (prompt('Type DELETE:')!=='DELETE') { showToast('Cancelled','info'); return; }
+            database=[]; saveToStorage(); renderRecordsTable();
+            document.getElementById('result').className='result-box'; document.getElementById('result').innerHTML='';
+            showToast('All records deleted','error');
+        }
+
+        // ==================== DRAG & DROP ====================
+        function setupDragDrop() {
+            const dropZone = document.getElementById('dropZone');
+            if (!dropZone) return;
+            ['dragenter','dragover','dragleave','drop'].forEach(ev=>dropZone.addEventListener(ev, e=>{e.preventDefault();e.stopPropagation();}));
+            ['dragenter','dragover'].forEach(ev=>dropZone.addEventListener(ev, ()=>dropZone.classList.add('dragover')));
+            ['dragleave','drop'].forEach(ev=>dropZone.addEventListener(ev, ()=>dropZone.classList.remove('dragover')));
+            dropZone.addEventListener('drop', e=>{
+                const files = e.dataTransfer.files;
+                if (files.length) { document.getElementById('fileInput').files = files; handleFileUpload(files); }
+            });
+        }
+
+        // ==================== INIT ====================
+        window.onload = function() {
+            setupDragDrop();
+            loadLiveData(); // Fetches from Google Sheets (or falls back to cache)
+            if (typeof pdfjsLib !== 'undefined') pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        };
+    </script>
+</body>
+</html>
