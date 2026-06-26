@@ -190,7 +190,7 @@
                     <button class="btn btn-danger" id="btnClear"><i class="fas fa-trash-alt"></i> Clear All</button>
                 </div>
                 <div class="url-input-container" id="urlContainer" style="display:none;">
-                    <input type="url" id="csvUrl" placeholder="Paste public CSV URL (Google Sheets, GitHub raw, etc.)" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vSwgm4AR_P-VQ96XKwA4lR8PNAy_ef3MFwDg4dnxMF9ua34iZXtuixEukXF3o_g9KWW5Z3c8qSq947V/pub?output=csv" />
+                    <input type="url" id="csvUrl" placeholder="Paste public CSV URL (Google Sheets, GitHub raw, etc.)" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vSwgm4AR_P-VQ96XKwA4lR8PNAy_ef3MFwDg4dnxMF9ua34iZXtuixEukXF3o_g9KWW5Z3c8qSq947V/pub?gid=0&single=true&output=csv" />
                     <button class="btn btn-fetch" id="btnFetchUrl"><i class="fas fa-cloud-download-alt"></i> Load from URL</button>
                     <button class="btn btn-cancel-url" id="btnCancelUrl">Cancel</button>
                 </div>
@@ -252,13 +252,17 @@
             const SESSION_KEY = 'mm2h_session';
             const DEFAULT_CRED = { username: 'AHS', password: '123' };
 
-            // ---- Google Sheet CSV URL (via CORS proxy) ----
-            const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSwgm4AR_P-VQ96XKwA4lR8PNAy_ef3MFwDg4dnxMF9ua34iZXtuixEukXF3o_g9KWW5Z3c8qSq947V/pub?output=csv';
+            // ---- Google Sheet URLs ----
+            // Published CSV URL
+            const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSwgm4AR_P-VQ96XKwA4lR8PNAy_ef3MFwDg4dnxMF9ua34iZXtuixEukXF3o_g9KWW5Z3c8qSq947V/pub?gid=0&single=true&output=csv';
+            // Google Sheets JSON feed (no proxy needed, CORS-friendly)
+            const SHEET_JSON_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSwgm4AR_P-VQ96XKwA4lR8PNAy_ef3MFwDg4dnxMF9ua34iZXtuixEukXF3o_g9KWW5Z3c8qSq947V/pub?gid=0&single=true&output=csv';
             const PROXIES = [
                 (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-                (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`
+                (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+                (u) => `https://thingproxy.freeboard.io/fetch/${u}`,
             ];
-            const DEFAULT_CSV_URL = PROXIES[0](SHEET_CSV_URL);
+            const DEFAULT_CSV_URL = SHEET_CSV_URL;
 
             let appData = { applications: [], admin: { ...DEFAULT_CRED } };
             let isAdmin = false;
@@ -502,39 +506,51 @@
                 });
             }
 
-            // ---- Fetch from any public URL (Google Sheets, GitHub, etc.) with CORS proxy fallback ----
+            // ---- Fetch Google Sheets via multiple strategies ----
             async function fetchFromURL(url) {
-                // Always proxy Google Sheets URLs; try direct first for others
                 const isGoogleSheet = url.includes('docs.google.com');
+
+                // Strategy 1: Try fetching CSV directly (works on some browsers/hosts)
+                // Strategy 2-4: Try each CORS proxy
                 const urlsToTry = isGoogleSheet
-                    ? PROXIES.map(p => p(SHEET_CSV_URL))
+                    ? [SHEET_CSV_URL, ...PROXIES.map(p => p(SHEET_CSV_URL))]
                     : [url, ...PROXIES.map(p => p(url))];
 
                 let lastError = null;
                 for (const tryUrl of urlsToTry) {
                     try {
-                        const resp = await fetch(tryUrl);
+                        console.log('🔄 Trying:', tryUrl.substring(0, 60) + '...');
+                        const controller = new AbortController();
+                        const timeout = setTimeout(() => controller.abort(), 8000);
+                        const resp = await fetch(tryUrl, {
+                            signal: controller.signal,
+                            mode: 'cors',
+                            cache: 'no-cache'
+                        });
+                        clearTimeout(timeout);
                         if (!resp.ok) {
-                            let errMsg = `HTTP ${resp.status}`;
-                            if (resp.status === 404) errMsg = 'File not found (404). Check the URL.';
-                            else if (resp.status === 403) errMsg = 'Access forbidden (403). Make sure the file is public.';
-                            else if (resp.status === 500) errMsg = 'Server error. Try again later.';
-                            lastError = new Error(errMsg);
+                            lastError = new Error(`HTTP ${resp.status}`);
                             continue;
                         }
                         const text = await resp.text();
-                        if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
-                            lastError = new Error('The response is not CSV. The URL may be wrong or the file is not public.');
+                        if (!text || text.trim().length === 0) {
+                            lastError = new Error('Empty response');
                             continue;
                         }
+                        if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
+                            lastError = new Error('Got HTML instead of CSV. Sheet may not be published.');
+                            continue;
+                        }
+                        console.log('✅ Got CSV data, first 100 chars:', text.substring(0, 100));
                         const rows = parseCSV(text);
                         const data = csvToObjects(rows);
                         return parseApplicationData(data);
                     } catch (err) {
+                        console.warn('❌ Failed:', err.message);
                         lastError = err;
                     }
                 }
-                throw lastError || new Error('Failed to load CSV. Check the URL and try again.');
+                throw lastError || new Error('All fetch strategies failed. Check sheet is published as CSV.');
             }
 
             // ---- Replace data ----
@@ -571,23 +587,36 @@
 
             // ---- Auto-load from Google Sheets (runs for ALL users on page load) ----
             async function autoLoadFromURL() {
+                const indicator = document.getElementById('dataLoadStatus');
                 try {
+                    console.log('⏳ Fetching from Google Sheets...');
                     const parsed = await fetchFromURL(SHEET_CSV_URL);
                     if (parsed && parsed.length > 0) {
                         replaceData(parsed);
-                        const statusDiv = $('#uploadStatus');
-                        if (statusDiv && isAdmin) {
-                            statusDiv.innerHTML =
-                                `<i class="fas fa-check-circle" style="color:#27ae60;"></i> Auto-loaded ${parsed.length} records from Google Sheets.`;
-                        }
                         console.log('✅ Loaded ' + parsed.length + ' records from Google Sheets.');
+                        if (indicator) {
+                            indicator.style.background = '#d5f5e3';
+                            indicator.style.color = '#1a7a42';
+                            indicator.innerHTML = '<i class="fas fa-check-circle"></i> ' + parsed.length + ' applications loaded. Ready to search!';
+                            setTimeout(() => { indicator.style.display = 'none'; }, 4000);
+                        }
+                        const adminStatus = $('#uploadStatus');
+                        if (adminStatus && isAdmin) {
+                            adminStatus.innerHTML = `<i class="fas fa-check-circle" style="color:#27ae60;"></i> Auto-loaded ${parsed.length} records from Google Sheets.`;
+                        }
+                    } else {
+                        throw new Error('Sheet returned 0 records. Check your Google Sheet has data rows.');
                     }
                 } catch (err) {
-                    console.warn('Auto-load failed:', err.message);
-                    const statusDiv = $('#uploadStatus');
-                    if (statusDiv && isAdmin) {
-                        statusDiv.innerHTML =
-                            `<i class="fas fa-exclamation-circle" style="color:#f39c12;"></i> Auto-load failed: ${esc(err.message)}. You can still upload manually.`;
+                    console.error('❌ Auto-load failed:', err.message);
+                    if (indicator) {
+                        indicator.style.background = '#fde8e8';
+                        indicator.style.color = '#c0392b';
+                        indicator.innerHTML = '<i class="fas fa-exclamation-circle"></i> Could not load data: ' + err.message;
+                    }
+                    const adminStatus = $('#uploadStatus');
+                    if (adminStatus && isAdmin) {
+                        adminStatus.innerHTML = `<i class="fas fa-exclamation-circle" style="color:#f39c12;"></i> Auto-load failed: ${esc(err.message)}. You can still upload manually.`;
                     }
                 }
             }
