@@ -190,13 +190,13 @@
                     <button class="btn btn-danger" id="btnClear"><i class="fas fa-trash-alt"></i> Clear All</button>
                 </div>
                 <div class="url-input-container" id="urlContainer" style="display:none;">
-                    <input type="url" id="csvUrl" placeholder="Paste public CSV URL (GitHub raw, Google Sheets, etc.)" value="https://raw.githubusercontent.com/ho0123466139-code/MM2H-STATUS-CHECK/refs/heads/main/MM2H%20Apply%20Status%20-%20Sheet1_Table%201.csv" />
+                    <input type="url" id="csvUrl" placeholder="Paste public CSV URL (Google Sheets, GitHub raw, etc.)" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vSwgm4AR_P-VQ96XKwA4lR8PNAy_ef3MFwDg4dnxMF9ua34iZXtuixEukXF3o_g9KWW5Z3c8qSq947V/pub?output=csv" />
                     <button class="btn btn-fetch" id="btnFetchUrl"><i class="fas fa-cloud-download-alt"></i> Load from URL</button>
                     <button class="btn btn-cancel-url" id="btnCancelUrl">Cancel</button>
                 </div>
                 <div id="uploadStatus" style="margin-top:12px;font-size:0.95rem;"></div>
                 <div class="error-note" style="margin-top:12px;">
-                    <i class="fas fa-info-circle"></i> <strong>Tip:</strong> You can paste any public CSV URL. The app will auto-load from your GitHub CSV when you log in.
+                    <i class="fas fa-info-circle"></i> <strong>Tip:</strong> The app auto-loads live data from your Google Sheet every time Admin logs in. No manual upload needed!
                 </div>
             </div>
 
@@ -252,8 +252,13 @@
             const SESSION_KEY = 'mm2h_session';
             const DEFAULT_CRED = { username: 'AHS', password: '123' };
 
-            // ---- Your GitHub raw CSV URL ----
-            const DEFAULT_CSV_URL = 'https://raw.githubusercontent.com/ho0123466139-code/MM2H-STATUS-CHECK/refs/heads/main/MM2H%20Apply%20Status%20-%20Sheet1_Table%201.csv';
+            // ---- Google Sheet CSV URL (via CORS proxy) ----
+            const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSwgm4AR_P-VQ96XKwA4lR8PNAy_ef3MFwDg4dnxMF9ua34iZXtuixEukXF3o_g9KWW5Z3c8qSq947V/pub?output=csv';
+            const PROXIES = [
+                (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+                (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`
+            ];
+            const DEFAULT_CSV_URL = PROXIES[0](SHEET_CSV_URL);
 
             let appData = { applications: [], admin: { ...DEFAULT_CRED } };
             let isAdmin = false;
@@ -497,24 +502,39 @@
                 });
             }
 
-            // ---- Fetch from any public URL (GitHub, Google Sheets, etc.) ----
+            // ---- Fetch from any public URL (Google Sheets, GitHub, etc.) with CORS proxy fallback ----
             async function fetchFromURL(url) {
-                const resp = await fetch(url);
-                if (!resp.ok) {
-                    let errMsg = `HTTP ${resp.status}`;
-                    if (resp.status === 404) errMsg = 'File not found (404). Check the URL.';
-                    else if (resp.status === 403) errMsg = 'Access forbidden (403). Make sure the file is public.';
-                    else if (resp.status === 500) errMsg = 'Server error. Try again later.';
-                    throw new Error(errMsg);
+                // Always proxy Google Sheets URLs; try direct first for others
+                const isGoogleSheet = url.includes('docs.google.com');
+                const urlsToTry = isGoogleSheet
+                    ? PROXIES.map(p => p(SHEET_CSV_URL))
+                    : [url, ...PROXIES.map(p => p(url))];
+
+                let lastError = null;
+                for (const tryUrl of urlsToTry) {
+                    try {
+                        const resp = await fetch(tryUrl);
+                        if (!resp.ok) {
+                            let errMsg = `HTTP ${resp.status}`;
+                            if (resp.status === 404) errMsg = 'File not found (404). Check the URL.';
+                            else if (resp.status === 403) errMsg = 'Access forbidden (403). Make sure the file is public.';
+                            else if (resp.status === 500) errMsg = 'Server error. Try again later.';
+                            lastError = new Error(errMsg);
+                            continue;
+                        }
+                        const text = await resp.text();
+                        if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
+                            lastError = new Error('The response is not CSV. The URL may be wrong or the file is not public.');
+                            continue;
+                        }
+                        const rows = parseCSV(text);
+                        const data = csvToObjects(rows);
+                        return parseApplicationData(data);
+                    } catch (err) {
+                        lastError = err;
+                    }
                 }
-                const text = await resp.text();
-                // Check if it's HTML (error page)
-                if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
-                    throw new Error('The response is not CSV – the URL may be wrong or the file is not public.');
-                }
-                const rows = parseCSV(text);
-                const data = csvToObjects(rows);
-                return parseApplicationData(data);
+                throw lastError || new Error('Failed to load CSV. Check the URL and try again.');
             }
 
             // ---- Replace data ----
@@ -553,12 +573,12 @@
             async function autoLoadFromURL() {
                 const url = DEFAULT_CSV_URL;
                 try {
-                    toast('🔄 Auto-loading data from GitHub...', 'info', 3000);
+                    toast('🔄 Auto-loading data from Google Sheets...', 'info', 3000);
                     const parsed = await fetchFromURL(url);
                     if (parsed && parsed.length > 0) {
                         replaceData(parsed);
                         $('#uploadStatus').innerHTML =
-                            `<i class="fas fa-check-circle" style="color:#27ae60;"></i> Auto-loaded ${parsed.length} records from GitHub.`;
+                            `<i class="fas fa-check-circle" style="color:#27ae60;"></i> Auto-loaded ${parsed.length} records from Google Sheets.`;
                     }
                 } catch (err) {
                     console.warn('Auto-load failed:', err);
