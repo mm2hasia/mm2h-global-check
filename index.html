@@ -569,22 +569,26 @@
                 return true;
             }
 
-            // ---- Auto-load from GitHub ----
+            // ---- Auto-load from Google Sheets (runs for ALL users on page load) ----
             async function autoLoadFromURL() {
-                const url = DEFAULT_CSV_URL;
                 try {
-                    toast('🔄 Auto-loading data from Google Sheets...', 'info', 3000);
-                    const parsed = await fetchFromURL(url);
+                    const parsed = await fetchFromURL(SHEET_CSV_URL);
                     if (parsed && parsed.length > 0) {
                         replaceData(parsed);
-                        $('#uploadStatus').innerHTML =
-                            `<i class="fas fa-check-circle" style="color:#27ae60;"></i> Auto-loaded ${parsed.length} records from Google Sheets.`;
+                        const statusDiv = $('#uploadStatus');
+                        if (statusDiv && isAdmin) {
+                            statusDiv.innerHTML =
+                                `<i class="fas fa-check-circle" style="color:#27ae60;"></i> Auto-loaded ${parsed.length} records from Google Sheets.`;
+                        }
+                        console.log('✅ Loaded ' + parsed.length + ' records from Google Sheets.');
                     }
                 } catch (err) {
-                    console.warn('Auto-load failed:', err);
-                    $('#uploadStatus').innerHTML =
-                        `<i class="fas fa-exclamation-circle" style="color:#f39c12;"></i> Auto-load failed: ${esc(err.message)}. You can still upload manually.`;
-                    toast(`Auto-load failed: ${err.message}`, 'warning', 5000);
+                    console.warn('Auto-load failed:', err.message);
+                    const statusDiv = $('#uploadStatus');
+                    if (statusDiv && isAdmin) {
+                        statusDiv.innerHTML =
+                            `<i class="fas fa-exclamation-circle" style="color:#f39c12;"></i> Auto-load failed: ${esc(err.message)}. You can still upload manually.`;
+                    }
                 }
             }
 
@@ -792,11 +796,12 @@
                 // Initial view
                 if (isAdmin) {
                     showView('admin-dashboard');
-                    // Auto-load if admin session exists
-                    autoLoadFromURL();
                 } else {
                     showView('home');
                 }
+
+                // Always auto-load data from Google Sheets for ALL users
+                autoLoadFromURL();
 
                 // Quick Enter on passport field
                 $('#userPassport').addEventListener('keydown', (e) => {
